@@ -17,6 +17,13 @@ set -e
 
 PROG="$(basename "$0")"
 
+PROXMOX="0"
+VIRTTOOL="libvirt"
+if [ "$PROG" == "usb-proxmox-hotplug.sh" ]; then
+  PROXMOX="1"
+  VIRTTOOL="proxmox"
+fi
+
 if [ ! -t 1 ]; then
   # stdout is not a tty. Send all output to syslog.
   coproc logger --tag "${PROG}"
@@ -25,7 +32,7 @@ fi
 
 DOMAIN="$1"
 if [ -z "${DOMAIN}" ]; then
-  echo "Missing libvirt domain parameter for ${PROG}." >&2
+  echo "Missing $VIRTTOOL domain parameter for ${PROG}." >&2
   exit 1
 fi
 
@@ -98,11 +105,20 @@ DEVNUM=$((10#$DEVNUM))
 # Run the appropriate virsh-command, and ask it to read the
 # update XML from stdin.
 #
-echo "Running virsh ${COMMAND} ${DOMAIN} for USB bus=${BUSNUM} device=${DEVNUM}:" >&2
-virsh "${COMMAND}" "${DOMAIN}" /dev/stdin <<END
+
+if [ "$PROXMOX" == "1" ]; then
+  if [ "$COMMAND" == 'attach-device' ]; then
+    pvesh create /nodes/localhost/qemu/$DOMAIN/monitor --command "device_add usb-host,hostbus=${BUSNUM},hostaddr=${DEVNUM},id=autousb${BUSNUM}_${DEVNUM}" >/dev/null
+  else
+    pvesh create /nodes/localhost/qemu/$DOMAIN/monitor --command "device_del autousb${BUSNUM}_${DEVNUM}" >/dev/null
+  fi
+else
+  echo "Running virsh ${COMMAND} ${DOMAIN} for USB bus=${BUSNUM} device=${DEVNUM}:" >&2
+  virsh "${COMMAND}" "${DOMAIN}" /dev/stdin <<END
 <hostdev mode='subsystem' type='usb'>
   <source>
     <address bus='${BUSNUM}' device='${DEVNUM}' />
   </source>
 </hostdev>
 END
+fi
